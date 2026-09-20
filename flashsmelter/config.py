@@ -66,6 +66,10 @@ _ENV_FIELDS: dict[str, Any] = {
     "furnace_purge_seconds": float,
     "furnace_min_smelt_dwell_seconds": float,
     "furnace_transition_timeout_seconds": float,
+    "cm_debounce_samples": int,
+    "cm_clear_samples": int,
+    "cm_renotify_cooldown_seconds": float,
+    "cm_history_max_limit": int,
 }
 
 
@@ -120,6 +124,13 @@ class Settings:
     furnace_purge_seconds: float = 15.0
     furnace_min_smelt_dwell_seconds: float = 45.0
     furnace_transition_timeout_seconds: float = 600.0
+
+    # 大机组振动/温度在线监测：去抖样本数、解除确认样本数、同报警再通知冷却窗、
+    # 历史查询单次最大条数。默认采样周期约 1~10 s，3 次去抖即 3~30 s 确认。
+    cm_debounce_samples: int = 3
+    cm_clear_samples: int = 3
+    cm_renotify_cooldown_seconds: float = 1800.0
+    cm_history_max_limit: int = 5000
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None, **overrides: Any) -> "Settings":
@@ -241,6 +252,23 @@ class Settings:
                     "timeout": self.furnace_transition_timeout_seconds,
                     "purge": self.furnace_purge_seconds,
                 },
+            )
+        if self.cm_debounce_samples < 1:
+            raise ValidationError(
+                "监测报警去抖样本数必须为正", details={"cm_debounce_samples": self.cm_debounce_samples}
+            )
+        if self.cm_clear_samples < 1:
+            raise ValidationError(
+                "监测报警解除确认样本数必须为正", details={"cm_clear_samples": self.cm_clear_samples}
+            )
+        if self.cm_renotify_cooldown_seconds < 0:
+            raise ValidationError(
+                "同报警再通知冷却窗不能为负",
+                details={"cm_renotify_cooldown_seconds": self.cm_renotify_cooldown_seconds},
+            )
+        if self.cm_history_max_limit < 100:
+            raise ValidationError(
+                "监测历史查询上限过小", details={"cm_history_max_limit": self.cm_history_max_limit}
             )
 
     def with_root(self, root: Path | str) -> "Settings":

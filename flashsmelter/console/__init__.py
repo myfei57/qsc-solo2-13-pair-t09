@@ -115,6 +115,16 @@ class ConsoleApp:
         self.router.add("GET", "/api/components", self._components)
         self.router.add("GET", "/api/components/{component}", self._component)
         self.router.add("GET", "/api/zones", self._zones)
+        self.router.add("GET", "/api/monitor", self._monitor)
+        self.router.add("GET", "/api/monitor/equipment", self._monitor_equipment)
+        self.router.add(
+            "GET", "/api/monitor/equipment/{equipment}/detail", self._monitor_equipment
+        )
+        self.router.add(
+            "GET", "/api/monitor/equipment/{equipment}/trend", self._monitor_trend
+        )
+        self.router.add("GET", "/api/monitor/alarms", self._monitor_alarms)
+        self.router.add("GET", "/api/monitor/dispositions", self._monitor_dispositions)
         for name in self.application.actions:
             component, verb = name.split(".", 1)
             self.router.add("POST", f"/api/{component}/{verb}", self._action_handler(name))
@@ -211,6 +221,79 @@ class ConsoleApp:
             "namespace": self.application.namespace.prefix,
             "zones": {zone: sorted(names) for zone, names in sorted(zones.items())},
         }
+
+    # ----------------------------------------------------- 大机组监测视图
+    def _monitor(self, _path: Mapping[str, str], params: Mapping[str, Any]) -> Mapping[str, Any]:
+        from ..params import Params
+
+        parsed = Params(params, source="http:monitor")
+        active_only = parsed.boolean("active_only", required=False, default=False)
+        payload = dict(self.application.monitor_status())
+        if active_only:
+            payload["active_alarms"] = [
+                alarm for alarm in payload["active_alarms"] if alarm["level"] != "normal"
+            ]
+            payload["active_alarm_count"] = len(payload["active_alarms"])
+        return payload
+
+    def _monitor_equipment(
+        self, path: Mapping[str, str], params: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        return self.application.monitor_equipment(path.get("equipment"))
+
+    def _monitor_trend(
+        self, path: Mapping[str, str], params: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        from ..params import Params
+
+        parsed = Params(params, source="http:monitor-trend")
+        limit = parsed.integer(
+            "limit",
+            required=False,
+            default=500,
+            minimum=1,
+            maximum=self.application.settings.cm_history_max_limit,
+        )
+        point_id = parsed.optional_text("point_id")
+        return self.application.monitor_trend(
+            path["equipment"], point_id, limit=limit
+        )
+
+    def _monitor_alarms(
+        self, _path: Mapping[str, str], params: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        from ..params import Params
+
+        parsed = Params(params, source="http:monitor-alarms")
+        settings = self.application.settings
+        limit = parsed.integer(
+            "limit",
+            required=False,
+            default=200,
+            minimum=1,
+            maximum=settings.cm_history_max_limit,
+        )
+        active_only = parsed.boolean("active_only", required=False, default=False)
+        equipment_id = parsed.optional_text("equipment_id")
+        return self.application.monitor_alarms(
+            equipment_id=equipment_id, active_only=active_only, limit=limit
+        )
+
+    def _monitor_dispositions(
+        self, _path: Mapping[str, str], params: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        from ..params import Params
+
+        parsed = Params(params, source="http:monitor-dispositions")
+        limit = parsed.integer(
+            "limit",
+            required=False,
+            default=200,
+            minimum=1,
+            maximum=self.application.settings.cm_history_max_limit,
+        )
+        equipment_id = parsed.optional_text("equipment_id")
+        return self.application.monitor_dispositions(equipment_id=equipment_id, limit=limit)
 
     # ------------------------------------------------------------------ 分发
     def handle(

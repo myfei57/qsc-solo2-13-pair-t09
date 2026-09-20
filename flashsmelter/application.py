@@ -10,6 +10,7 @@ from typing import Any, Callable, Mapping
 
 from .audit import AuditLog
 from .burner import Burner
+from .cm import ConditionMonitor
 from .component import Component, ensure_actor
 from .conc import ConcentrateSystem
 from .config import Settings
@@ -81,6 +82,8 @@ class Application:
         self.slag.bind_matte(self.matte)
         self.matte.bind_converter(self.conv)
         self.oxygen.bind_feed_port(self.conc)
+        self.cm = ConditionMonitor(ctx)
+        self.cm.bootstrap_defaults()
         self.components: tuple[Component, ...] = (
             self.furnace,
             self.burner,
@@ -91,6 +94,7 @@ class Application:
             self.matte,
             self.conv,
             self.waste,
+            self.cm,
         )
         self._by_name: dict[str, Component] = {component.name: component for component in self.components}
 
@@ -520,6 +524,60 @@ class Application:
                 expected_generation=params.optional_number("expected_generation"),
             )
 
+        @register("cm.register_equipment")
+        def _cm_register(params: Params) -> Mapping[str, Any]:
+            overrides = params.mapping("threshold_overrides")
+            return self.cm.register_equipment(
+                params.text("actor", required=False, default="control-room"),
+                equipment_id=params.text("equipment_id"),
+                kind=params.text("kind"),
+                label=params.optional_text("label"),
+                bearing_count=params.integer(
+                    "bearing_count", required=False, default=2, minimum=1, maximum=12
+                ),
+                threshold_overrides=overrides or None,
+                correlation_id=params.optional_text("correlation_id"),
+            )
+
+        @register("cm.ingest")
+        def _cm_ingest(params: Params) -> Mapping[str, Any]:
+            return self.cm.ingest(
+                params.text("actor", required=False, default="collector"),
+                equipment_id=params.text("equipment_id"),
+                point_id=params.text("point_id"),
+                value=params.number("value"),
+                observed_at=params.optional_text("observed_at"),
+                correlation_id=params.optional_text("correlation_id"),
+            )
+
+        @register("cm.acknowledge")
+        def _cm_ack(params: Params) -> Mapping[str, Any]:
+            return self.cm.acknowledge(
+                params.text("actor", required=False, default="operator"),
+                alarm_id=params.text("alarm_id"),
+                note=params.optional_text("note"),
+                correlation_id=params.optional_text("correlation_id"),
+            )
+
+        @register("cm.dispose")
+        def _cm_dispose(params: Params) -> Mapping[str, Any]:
+            return self.cm.dispose(
+                params.text("actor", required=False, default="operator"),
+                alarm_id=params.text("alarm_id"),
+                action=params.text("action"),
+                note=params.optional_text("note"),
+                correlation_id=params.optional_text("correlation_id"),
+            )
+
+        @register("cm.note")
+        def _cm_note(params: Params) -> Mapping[str, Any]:
+            return self.cm.add_note(
+                params.text("actor", required=False, default="operator"),
+                alarm_id=params.text("alarm_id"),
+                note=params.text("note"),
+                correlation_id=params.optional_text("correlation_id"),
+            )
+
         return actions
 
     # ------------------------------------------------------------- 对外接口
@@ -570,6 +628,36 @@ class Application:
             actor=actor,
         )
         return [event.to_dict() for event in events]
+
+    # ----------------------------------------------------- 大机组监测查询
+    def monitor_status(self) -> Mapping[str, Any]:
+        return dict(self.cm.status())
+
+    def monitor_equipment(self, equipment_id: str | None = None) -> Mapping[str, Any]:
+        if equipment_id is None:
+            return {"equipment": self.cm.list_equipment()}
+        return dict(self.cm.equipment_status(equipment_id))
+
+    def monitor_trend(
+        self, equipment_id: str, point_id: str | None = None, *, limit: int = 500
+    ) -> Mapping[str, Any]:
+        return dict(self.cm.trend_report(equipment_id=equipment_id, point_id=point_id, limit=limit))
+
+    def monitor_alarms(
+        self,
+        *,
+        equipment_id: str | None = None,
+        active_only: bool = False,
+        limit: int = 200,
+    ) -> Mapping[str, Any]:
+        return dict(
+            self.cm.alarm_history(equipment_id=equipment_id, active_only=active_only, limit=limit)
+        )
+
+    def monitor_dispositions(
+        self, *, equipment_id: str | None = None, limit: int = 200
+    ) -> Mapping[str, Any]:
+        return dict(self.cm.dispositions(equipment_id=equipment_id, limit=limit))
 
     def verify(self) -> Mapping[str, Any]:
         report = self.store.verify()
