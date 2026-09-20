@@ -144,6 +144,33 @@ def _cmd_heat(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_rotating(args: argparse.Namespace) -> int:
+    application = Application(_build_settings(args))
+    if args.view == "fleet":
+        _print(application.rotating_fleet())
+    elif args.view == "alarms":
+        _print(
+            {
+                "alarms": application.rotating_alarms(
+                    machine_id=args.machine,
+                    include_closed=args.include_closed,
+                    limit=args.limit,
+                )
+            }
+        )
+    elif args.view == "notifications":
+        _print(application.rotating_notifications(limit=args.limit))
+    elif args.view == "history":
+        if not args.machine:
+            raise ValidationError("history 视图必须指定 --machine")
+        _print(application.rotating_history(args.machine, limit=args.limit))
+    else:
+        if not args.machine or not args.point:
+            raise ValidationError("trend 视图必须同时指定 --machine 与 --point")
+        _print(application.rotating_trend(args.machine, args.point, limit=args.limit))
+    return 0
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     application = Application(_build_settings(args))
     report = application.verify()
@@ -191,6 +218,18 @@ def build_parser() -> argparse.ArgumentParser:
     heat = subparsers.add_parser("heat", help="打印炉次与转炉批次")
     heat.add_argument("--limit", type=int, default=5)
     heat.set_defaults(func=_cmd_heat)
+
+    rotating = subparsers.add_parser("rotating", help="转动设备（风机/磨机）在线监测")
+    rotating.add_argument(
+        "view",
+        choices=("fleet", "alarms", "notifications", "history", "trend"),
+        help="fleet=机组概览 alarms=报警列表 notifications=通知 history=单机历史 trend=测点趋势",
+    )
+    rotating.add_argument("--machine", help="机台 ID，如 fan-ID01")
+    rotating.add_argument("--point", help="测点 ID，如 temp-de（trend 必填）")
+    rotating.add_argument("--limit", type=int, default=100)
+    rotating.add_argument("--include-closed", action="store_true", help="包含已归档报警")
+    rotating.set_defaults(func=_cmd_rotating)
 
     verify = subparsers.add_parser("verify", help="校验落盘数据完整性")
     verify.set_defaults(func=_cmd_verify)

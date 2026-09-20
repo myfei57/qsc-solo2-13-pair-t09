@@ -20,6 +20,7 @@ from .matte import MatteTap
 from .ns import Namespace
 from .oxygen import OxygenSystem
 from .params import Params
+from .rotating import RotatingMonitor
 from .runtime import Clock, Generation, Metrics, RuntimeContext
 from .settler import Settler
 from .slag import SlagTap
@@ -78,6 +79,7 @@ class Application:
             waste=self.waste,
             converter=self.conv,
         )
+        self.rotating = RotatingMonitor(ctx)
         self.slag.bind_matte(self.matte)
         self.matte.bind_converter(self.conv)
         self.oxygen.bind_feed_port(self.conc)
@@ -91,6 +93,7 @@ class Application:
             self.matte,
             self.conv,
             self.waste,
+            self.rotating,
         )
         self._by_name: dict[str, Component] = {component.name: component for component in self.components}
 
@@ -520,6 +523,54 @@ class Application:
                 expected_generation=params.optional_number("expected_generation"),
             )
 
+        @register("rotating.ingest")
+        def _rotating_ingest(params: Params) -> Mapping[str, Any]:
+            return self.rotating.ingest(
+                params.text("actor", required=False, default="data-acquisition"),
+                machine_id=params.text("machine_id"),
+                point_id=params.text("point_id"),
+                value=params.number("value", minimum=0.0),
+                correlation_id=params.optional_text("correlation_id"),
+                expected_generation=params.optional_number("expected_generation"),
+            )
+
+        @register("rotating.acknowledge")
+        def _rotating_acknowledge(params: Params) -> Mapping[str, Any]:
+            return self.rotating.acknowledge(
+                params.text("actor", required=False, default="control-room"),
+                machine_id=params.text("machine_id"),
+                point_id=params.text("point_id"),
+                rule_code=params.text("rule_code"),
+                note=params.text("note", required=False, default=""),
+                correlation_id=params.optional_text("correlation_id"),
+                expected_generation=params.optional_number("expected_generation"),
+            )
+
+        @register("rotating.dispose")
+        def _rotating_dispose(params: Params) -> Mapping[str, Any]:
+            return self.rotating.dispose(
+                params.text("actor", required=False, default="control-room"),
+                alarm_id=params.text("alarm_id"),
+                disposition=params.text("disposition"),
+                note=params.text("note", required=False, default=""),
+                correlation_id=params.optional_text("correlation_id"),
+                expected_generation=params.optional_number("expected_generation"),
+            )
+
+        @register("rotating.sweep")
+        def _rotating_sweep(params: Params) -> Mapping[str, Any]:
+            return self.rotating.sweep(
+                params.text("actor", required=False, default="monitor-scan"),
+                correlation_id=params.optional_text("correlation_id"),
+            )
+
+        @register("rotating.mark_all_read")
+        def _rotating_mark_read(params: Params) -> Mapping[str, Any]:
+            return self.rotating.mark_all_read(
+                params.text("actor", required=False, default="control-room"),
+                correlation_id=params.optional_text("correlation_id"),
+            )
+
         return actions
 
     # ------------------------------------------------------------- 对外接口
@@ -570,6 +621,48 @@ class Application:
             actor=actor,
         )
         return [event.to_dict() for event in events]
+
+    # ------------------------------------------------------- 转动设备监测查询
+    def rotating_fleet(self) -> Mapping[str, Any]:
+        return self.rotating.fleet_status()
+
+    def rotating_trend(
+        self,
+        machine_id: str,
+        point_id: str,
+        *,
+        limit: int = 600,
+        window_seconds: float | None = None,
+    ) -> Mapping[str, Any]:
+        return self.rotating.trend(
+            machine_id, point_id, limit=limit, window_seconds=window_seconds
+        )
+
+    def rotating_alarms(
+        self,
+        *,
+        machine_id: str | None = None,
+        status: str | None = None,
+        include_closed: bool = False,
+        include_recovered: bool = True,
+        limit: int = 200,
+    ) -> list[Mapping[str, Any]]:
+        return self.rotating.list_alarms(
+            machine_id=machine_id,
+            status=status,
+            include_closed=include_closed,
+            include_recovered=include_recovered,
+            limit=limit,
+        )
+
+    def rotating_alarm(self, alarm_id: str) -> Mapping[str, Any]:
+        return self.rotating.alarm_detail(alarm_id)
+
+    def rotating_notifications(self, *, limit: int = 100, only_unread: bool = False) -> Mapping[str, Any]:
+        return self.rotating.notifications(limit=limit, only_unread=only_unread)
+
+    def rotating_history(self, machine_id: str, *, limit: int = 100) -> Mapping[str, Any]:
+        return self.rotating.history_for_machine(machine_id, limit=limit)
 
     def verify(self) -> Mapping[str, Any]:
         report = self.store.verify()

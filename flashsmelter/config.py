@@ -66,6 +66,14 @@ _ENV_FIELDS: dict[str, Any] = {
     "furnace_purge_seconds": float,
     "furnace_min_smelt_dwell_seconds": float,
     "furnace_transition_timeout_seconds": float,
+    "rotating_warn_on_delay_seconds": float,
+    "rotating_danger_on_delay_seconds": float,
+    "rotating_off_delay_seconds": float,
+    "rotating_ack_escalate_seconds": float,
+    "rotating_rate_window_seconds": float,
+    "rotating_rate_min_interval_seconds": float,
+    "rotating_alarm_deadband_pct": float,
+    "rotating_trend_window_seconds": float,
 }
 
 
@@ -120,6 +128,17 @@ class Settings:
     furnace_purge_seconds: float = 15.0
     furnace_min_smelt_dwell_seconds: float = 45.0
     furnace_transition_timeout_seconds: float = 600.0
+
+    # 转动设备（风机/磨机）在线监测：阈值在设备台账里逐台配置，这里只放
+    # 通用的延时、速率窗口与死带参数。
+    rotating_warn_on_delay_seconds: float = 30.0
+    rotating_danger_on_delay_seconds: float = 5.0
+    rotating_off_delay_seconds: float = 60.0
+    rotating_ack_escalate_seconds: float = 300.0
+    rotating_rate_window_seconds: float = 60.0
+    rotating_rate_min_interval_seconds: float = 20.0
+    rotating_alarm_deadband_pct: float = 0.05
+    rotating_trend_window_seconds: float = 3600.0
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None, **overrides: Any) -> "Settings":
@@ -241,6 +260,30 @@ class Settings:
                     "timeout": self.furnace_transition_timeout_seconds,
                     "purge": self.furnace_purge_seconds,
                 },
+            )
+        for field_name in (
+            "rotating_warn_on_delay_seconds",
+            "rotating_danger_on_delay_seconds",
+            "rotating_off_delay_seconds",
+            "rotating_ack_escalate_seconds",
+            "rotating_rate_window_seconds",
+            "rotating_rate_min_interval_seconds",
+            "rotating_trend_window_seconds",
+        ):
+            if getattr(self, field_name) <= 0:
+                raise ValidationError("转动监测时长参数必须为正", details={"field": field_name})
+        if self.rotating_danger_on_delay_seconds >= self.rotating_warn_on_delay_seconds:
+            raise ValidationError(
+                "危险级确认延时应短于预警级确认延时",
+                details={
+                    "danger": self.rotating_danger_on_delay_seconds,
+                    "warn": self.rotating_warn_on_delay_seconds,
+                },
+            )
+        if not 0 <= self.rotating_alarm_deadband_pct < 0.5:
+            raise ValidationError(
+                "报警死带比例必须落在 [0, 0.5) 区间",
+                details={"deadband_pct": self.rotating_alarm_deadband_pct},
             )
 
     def with_root(self, root: Path | str) -> "Settings":

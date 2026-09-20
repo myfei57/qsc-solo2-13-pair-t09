@@ -115,6 +115,18 @@ class ConsoleApp:
         self.router.add("GET", "/api/components", self._components)
         self.router.add("GET", "/api/components/{component}", self._component)
         self.router.add("GET", "/api/zones", self._zones)
+        self.router.add("GET", "/api/rotating/fleet", self._rotating_fleet)
+        self.router.add("GET", "/api/rotating/notifications", self._rotating_notifications)
+        self.router.add("GET", "/api/rotating/alarms", self._rotating_alarms)
+        self.router.add("GET", "/api/rotating/alarms/{alarm_id}", self._rotating_alarm_detail)
+        self.router.add(
+            "GET", "/api/rotating/machines/{machine_id}/history", self._rotating_machine_history
+        )
+        self.router.add(
+            "GET",
+            "/api/rotating/machines/{machine_id}/points/{point_id}/trend",
+            self._rotating_trend,
+        )
         for name in self.application.actions:
             component, verb = name.split(".", 1)
             self.router.add("POST", f"/api/{component}/{verb}", self._action_handler(name))
@@ -211,6 +223,56 @@ class ConsoleApp:
             "namespace": self.application.namespace.prefix,
             "zones": {zone: sorted(names) for zone, names in sorted(zones.items())},
         }
+
+    # ------------------------------------------------------ 转动设备监测视图
+    def _rotating_fleet(self, _path: Mapping[str, str], _params: Mapping[str, Any]) -> Mapping[str, Any]:
+        return self.application.rotating_fleet()
+
+    def _rotating_notifications(self, _path: Mapping[str, str], params: Mapping[str, Any]) -> Mapping[str, Any]:
+        from ..params import Params
+
+        parsed = Params(params, source="http:rotating-notifications")
+        limit = parsed.integer("limit", required=False, default=100, minimum=1, maximum=1000)
+        only_unread = parsed.boolean("only_unread", required=False, default=False)
+        return self.application.rotating_notifications(limit=limit, only_unread=only_unread)
+
+    def _rotating_alarms(self, _path: Mapping[str, str], params: Mapping[str, Any]) -> Mapping[str, Any]:
+        from ..params import Params
+
+        parsed = Params(params, source="http:rotating-alarms")
+        limit = parsed.integer("limit", required=False, default=200, minimum=1, maximum=1000)
+        include_closed = parsed.boolean("include_closed", required=False, default=False)
+        alarms = self.application.rotating_alarms(
+            machine_id=parsed.optional_text("machine_id"),
+            status=parsed.optional_text("status"),
+            include_closed=include_closed,
+            include_recovered=parsed.boolean("include_recovered", required=False, default=True),
+            limit=limit,
+        )
+        return {"count": len(alarms), "alarms": alarms}
+
+    def _rotating_alarm_detail(self, path: Mapping[str, str], _params: Mapping[str, Any]) -> Mapping[str, Any]:
+        return self.application.rotating_alarm(path["alarm_id"])
+
+    def _rotating_machine_history(self, path: Mapping[str, str], params: Mapping[str, Any]) -> Mapping[str, Any]:
+        from ..params import Params
+
+        parsed = Params(params, source="http:rotating-history")
+        limit = parsed.integer("limit", required=False, default=100, minimum=1, maximum=1000)
+        return self.application.rotating_history(path["machine_id"], limit=limit)
+
+    def _rotating_trend(self, path: Mapping[str, str], params: Mapping[str, Any]) -> Mapping[str, Any]:
+        from ..params import Params
+
+        parsed = Params(params, source="http:rotating-trend")
+        limit = parsed.integer("limit", required=False, default=600, minimum=1, maximum=5000)
+        window = parsed.optional_number("window_seconds", minimum=0.0)
+        return self.application.rotating_trend(
+            path["machine_id"],
+            path["point_id"],
+            limit=limit,
+            window_seconds=window,
+        )
 
     # ------------------------------------------------------------------ 分发
     def handle(
